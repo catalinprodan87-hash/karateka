@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>IRON PATH — A Martial Arts Legend</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{background:#000;height:100%;overflow:hidden}
+body{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:100vh;background:#000;overflow:hidden;touch-action:none;
+  font-family:'Courier New',monospace;
+}
+#cv{
+  display:block;image-rendering:pixelated;image-rendering:crisp-edges;
+  border:2px solid #222;
+}
+#pad{
+  display:flex;flex-wrap:wrap;gap:5px;padding:6px;
+  justify-content:center;max-width:420px;margin-top:4px;
+}
+.btn{
+  background:#111;color:#ccc;border:2px solid #444;border-radius:6px;
+  padding:9px 11px;font:bold 10px 'Courier New';cursor:pointer;
+  user-select:none;-webkit-user-select:none;touch-action:none;
+  text-align:center;min-width:54px;line-height:1.3;
+}
+.btn:active,.btn.on{background:#333;border-color:#aaa;}
+#bl,#br{border-color:#3388ff;}
+#bp{border-color:#ff3333;background:#1c0000;}
+#bk{border-color:#ffaa00;background:#1a0c00;}
+#bb{border-color:#33ee77;background:#001a08;}
+#bs{border-color:#666;}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="pad">
+  <button class="btn" id="bl">◀<br><small>WALK</small></button>
+  <button class="btn" id="br">▶<br><small>WALK</small></button>
+  <button class="btn" id="bp">PUNCH<br><small>[Z]</small></button>
+  <button class="btn" id="bk">KICK<br><small>[X]</small></button>
+  <button class="btn" id="bb">BLOCK<br><small>[C]</small></button>
+  <button class="btn" id="bs">START<br><small>[↵]</small></button>
+</div>
+
+<script>
+(function(){'use strict';
+
+/* ═══════════════════════════════════════════════════════
+   I R O N   P A T H  ·  A Martial Arts Legend
+   Original work by Catalin Prodan · 2024
+   Single-file HTML5 Canvas game · NES aesthetic
+   Inspired by classic 1984-era side-scrolling combat games
+═══════════════════════════════════════════════════════ */
+
+// ── CANVAS SETUP ─────────────────────────────────────
+const NW=256, NH=240;
+const cv=document.getElementById('cv');
+const cx=cv.getContext('2d');
+let SC=3;
+
+function resize(){
+  const pad=document.getElementById('pad');
+  const avH=window.innerHeight-pad.offsetHeight-16;
+  SC=Math.max(2,Math.min(Math.floor(window.innerWidth/NW),Math.floor(avH/NH)));
+  cv.style.width=(NW*SC)+'px'; cv.style.height=(NH*SC)+'px';
+  cv.width=NW; cv.height=NH; cx.imageSmoothingEnabled=false;
+}
+resize(); window.addEventListener('resize',resize);
+
+// ── DRAWING HELPERS ──────────────────────────────────
+function R(x,y,w,h,c){cx.fillStyle=c;cx.fillRect(~~x,~~y,w,h);}
+function T(s,x,y,c,sz){
+  sz=sz||7; cx.font=sz+'px "Courier New"'; cx.textBaseline='top';
+  cx.fillStyle='#000'; cx.fillText(s,x+1,y+1);
+  cx.fillStyle=c||'#fff'; cx.fillText(s,x,y);
+}
+function Tc(s,y,c,sz){ // center text
+  sz=sz||7; cx.font=sz+'px "Courier New"'; cx.textBaseline='top';
+  const w=cx.measureText(s).width;
+  const x=~~((NW-w)/2);
+  cx.fillStyle='#000'; cx.fillText(s,x+1,y+1);
+  cx.fillStyle=c||'#fff'; cx.fillText(s,x,y);
+}
+
+// ── COLOURS (NES-inspired palette) ──────────────────
+const C={
+  SKY:'#1A2870',SKY2:'#2A3898',MTN:'#2A3460',MTN2:'#3A4480',
+  GND:'#1A3008',GND2:'#244010',PATH:'#5A4820',PATH2:'#4A3810',
+  WALL:'#3C3418',WALL2:'#2C2808',STONE:'#48403A',STONE2:'#383028',
+  GRASS:'#285010',FLOWER:'#FF4488',LEAF:'#188030',
+  BEAM:'#4C2C0A',DJWALL:'#1C0E06',DJFLR:'#3C1808',DJBM:'#5C2810',
+  LAN:'#FFCC44',LANG:'#FF7700',
+  PSK:'#F4C27C',PHR:'#221100',PGI:'#EEEEEE',PGD:'#AAAAAA',PBL:'#111111',PSH:'#222222',
+  GSK:'#C09060',GHR:'#110000',GST:'#CC2000',GSD:'#882000',GBL:'#440000',GSH:'#331100',
+  WSK:'#B08050',WHR:'#000000',WST:'#AA5500',WSD:'#663300',WBL:'#221100',WSH:'#221100',
+  MSK:'#C49858',MHR:'#110022',MST:'#223366',MSD:'#112244',MBL:'#CCAA00',MSH:'#111133',
+  BSK:'#D09050',BHR:'#000000',BST:'#330055',BSD:'#220033',BBL:'#FFAA00',BSH:'#111100',
+  HPBG:'#440000',HPFG:'#FF2200',HPLO:'#FF8800',EBG:'#003a00',EFG:'#00DD44',
+  BLK:'#000000',WHT:'#FFFFFF',YEL:'#FFCC00',RED:'#FF2200',
+  GRN:'#00CC44',CYN:'#00CCCC',ORG:'#FF8800',PRP:'#AA44FF',
+};
+
+// ── PALETTES (per enemy type) ─────────────────────────
+const PAL={
+  player:{sk:C.PSK,hr:C.PHR,gi:C.PGI,gd:C.PGD,bl:C.PBL,sh:C.PSH},
+  guard: {sk:C.GSK,hr:C.GHR,gi:C.GST,gd:C.GSD,bl:C.GBL,sh:C.GSH},
+  warrior:{sk:C.WSK,hr:C.WHR,gi:C.WST,gd:C.WSD,bl:C.WBL,sh:C.WSH},
+  master:{sk:C.MSK,hr:C.MHR,gi:C.MST,gd:C.MSD,bl:C.MBL,sh:C.MSH},
+  boss:  {sk:C.BSK,hr:C.BHR,gi:C.BST,gd:C.BSD,bl:C.BBL,sh:C.BSH},
+};
+
+// ── AUDIO ENGINE ─────────────────────────────────────
+let AC;
+function initAC(){
+  if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();
+  if(AC.state==='suspended')AC.resume();
+}
+function N(f,tp,dur,vol,wh){
+  if(!AC)return;
+  const t=AC.currentTime+(wh||0);
+  const o=AC.createOscillator(),g=AC.createGain();
+  o.connect(g);g.connect(AC.destination);
+  o.type=tp;o.frequency.setValueAtTime(f,t);
+  g.gain.setValueAtTime(vol,t);
+  g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  o.start(t);o.stop(t+dur+0.01);
+}
+function SFX(nm){
+  if(!AC)return;
+  switch(nm){
+    case'punch':N(220,'square',.06,.4);N(155,'square',.04,.25,.04);break;
+    case'kick': N(155,'triangle',.09,.4);N(88,'square',.06,.25,.05);break;
+    case'hit':  N(88,'sawtooth',.13,.5);N(62,'sawtooth',.10,.3,.06);break;
+    case'block':N(440,'square',.04,.2);N(330,'square',.04,.15,.02);break;
+    case'step': N(55,'triangle',.04,.1);break;
+    case'die':  for(let i=0;i<8;i++)N(180-i*18,'sawtooth',.08,.3,i*.07);break;
+    case'clear':[523,659,784,1047].forEach((f,i)=>N(f,'square',.16,.3,i*.16));break;
+    case'go':   [392,349,330,262].forEach((f,i)=>N(f,'sawtooth',.22,.35,i*.2));break;
+    case'beep': N(660,'square',.05,.18);break;
+    case'alert':N(523,'square',.1,.25);N(660,'square',.1,.25,.1);break;
+    case'tele': N(440,'square',.08,.22);N(550,'square',.08,.22,.08);break;
+    case'win':  [523,659,784,1047,784,659,784,1047].forEach((f,i)=>N(f,'square',.22,.3,i*.16));break;
+  }
+}
+
+// Music system ─────────────────────────────────────────
+let MIval=null,MBeat=0,MTime=0,MCur=null;
+const TRACKS={
+  title:{bpm:108,seq:[[523,.5],[0,.25],[587,.25],[659,.5],[784,.5],[0,.25],[659,.25],
+    [587,.5],[523,.75],[0,.25],[440,.5],[0,.25],[494,.25],[523,.5],[659,.5],
+    [0,.25],[523,.25],[494,.5],[440,1],[0,.5]]},
+  s1:{bpm:140,seq:[[330,.25],[370,.25],[440,.25],[494,.5],[0,.25],[440,.25],
+    [370,.25],[330,.5],[294,.25],[330,.25],[370,.25],[440,.5],[0,.25],
+    [330,.25],[294,.5],[0,.75]]},
+  s2:{bpm:125,seq:[[262,.25],[294,.25],[330,.5],[0,.25],[294,.25],[262,.5],
+    [220,.25],[247,.25],[262,.5],[0,.25],[220,.25],[196,.75],[0,.25],
+    [220,.25],[247,.25],[262,.25],[294,.25],[330,.5],[0,.25],[262,.25],
+    [247,.25],[220,.5],[196,.5],[0,.5]]},
+  boss:{bpm:155,seq:[[196,.125],[220,.125],[196,.125],[175,.25],[196,.25],[0,.125],
+    [165,.125],[185,.125],[165,.125],[147,.25],[165,.25],[0,.125],
+    [175,.125],[196,.125],[220,.125],[247,.25],[220,.25],[0,.125],
+    [147,.125],[165,.125],[175,.125],[196,.25],[175,.25],[0,.25]]},
+};
+function MUSIC(name){
+  if(MIval){clearInterval(MIval);MIval=null;}
+  MBeat=0; MCur=name;
+  if(!name||!AC)return;
+  const tr=TRACKS[name], spb=60/tr.bpm;
+  MTime=AC.currentTime+0.1;
+  function sched(){
+    if(!AC||!MCur)return;
+    const tr2=TRACKS[MCur];
+    if(!tr2)return;
+    const spb2=60/tr2.bpm;
+    while(MTime<AC.currentTime+0.35){
+      const nt=tr2.seq[MBeat%tr2.seq.length];
+      if(nt[0]>0){
+        N(nt[0],'square',nt[1]*spb2*.85,.11,MTime-AC.currentTime);
+        N(nt[0]/2,'triangle',nt[1]*spb2*.55,.07,MTime-AC.currentTime);
+      }
+      MTime+=nt[1]*spb2; MBeat++;
+    }
+  }
+  sched(); MIval=setInterval(sched,100);
+}
+
+// ── CHARACTER SPRITES ─────────────────────────────────
+// Characters: 20px wide × 30px tall, ground at GL=193
+const CW=20, CH=30, GL=193;
+// Sprite drawing uses a closure over current x/y/palette/flash
+let _X=0,_Y=0,_P=null,_F=null;
+function B(dx,dy,w,h,k){R(_X+dx,_Y+dy,w,h,_F||_P[k]);}
+
+// --- Poses ---
+function poseWalk(f){
+  // Head
+  B(4,0,8,2,'hr');B(3,0,2,8,'hr');B(3,1,12,8,'sk');B(9,3,3,2,'hr');B(13,5,2,1,'sk');
+  // Torso
+  B(2,9,6,2,'sk');B(1,11,14,9,'gi');B(1,15,14,2,'bl');
+  // Arms (swing)
+  if(f%2===0){B(15,10,3,8,'sk');B(0,11,3,6,'sk');}
+  else{B(15,11,3,6,'sk');B(0,10,3,8,'sk');}
+  // Legs
+  if(f%2===0){
+    B(1,20,6,9,'gi');B(10,20,6,9,'gd');B(0,27,8,3,'sh');B(10,27,5,3,'sh');
+  }else{
+    B(1,20,6,9,'gd');B(10,20,6,9,'gi');B(0,27,5,3,'sh');B(10,27,8,3,'sh');
+  }
+}
+function poseStand(){
+  B(3,0,8,2,'hr');B(2,0,2,8,'hr');B(2,1,11,8,'sk');B(8,3,3,2,'hr');B(12,5,2,1,'sk');
+  B(3,9,5,2,'sk');B(0,11,14,9,'gi');B(0,15,14,2,'bl');
+  B(14,9,4,4,'sk');B(14,12,4,4,'sk');B(0,10,3,7,'sk');
+  B(0,20,6,9,'gi');B(9,20,6,9,'gd');B(0,27,7,3,'sh');B(9,27,6,3,'sh');
+}
+function posePunch(f){
+  B(3,0,8,2,'hr');B(2,0,2,8,'hr');B(2,1,11,8,'sk');B(8,3,3,2,'hr');B(12,5,2,1,'sk');
+  B(2,9,5,2,'sk');B(0,11,14,9,'gi');B(0,15,14,2,'bl');B(0,10,3,7,'sk');
+  if(f===0){B(13,10,5,4,'sk');}
+  else{B(13,10,10,3,'sk');B(19,9,5,5,'sk');} // extended fist
+  B(0,20,6,9,'gi');B(9,20,6,9,'gd');B(0,27,7,3,'sh');B(9,27,6,3,'sh');
+}
+function poseKick(f){
+  B(2,1,8,2,'hr');B(1,1,2,8,'hr');B(1,2,11,8,'sk');B(7,4,3,2,'hr');B(11,6,2,1,'sk');
+  B(1,10,5,2,'sk');B(0,12,12,9,'gi');B(0,16,12,2,'bl');
+  B(12,11,5,5,'sk');B(0,11,4,4,'sk');
+  B(0,21,6,9,'gi');B(0,28,7,2,'sh'); // standing leg
+  if(f===0){B(8,20,6,8,'gd');B(8,26,6,4,'sh');}
+  else{B(8,17,13,4,'gi');B(16,13,5,5,'gd');B(18,12,6,5,'sh');} // kick!
+}
+function poseBlock(){
+  B(3,0,8,2,'hr');B(2,0,2,8,'hr');B(2,1,11,8,'sk');B(8,3,3,2,'hr');B(12,5,2,1,'sk');
+  B(3,9,5,2,'sk');B(0,11,14,9,'gi');B(0,15,14,2,'bl');
+  B(11,7,7,5,'sk');B(12,10,6,5,'sk');B(11,7,6,3,'gi');B(0,10,3,7,'sk');
+  B(0,20,6,9,'gi');B(9,20,6,9,'gd');B(0,27,7,3,'sh');B(9,27,6,3,'sh');
+}
+function poseHit(){
+  B(1,1,8,2,'hr');B(0,1,2,8,'hr');B(0,2,11,8,'sk');B(6,5,3,2,'hr');
+  B(0,10,5,2,'sk');B(0,12,11,9,'gi');B(0,16,11,2,'bl');
+  B(11,7,5,6,'sk');B(0,9,4,7,'sk');
+  B(0,21,5,8,'gi');B(7,21,5,8,'gd');B(0,27,6,3,'sh');B(7,28,6,2,'sh');
+}
+function poseDie(f){
+  if(f===0){
+    B(1,3,8,2,'hr');B(0,3,2,8,'hr');B(0,4,11,8,'sk');B(6,7,3,2,'hr');
+    B(0,12,5,2,'sk');B(0,14,11,8,'gi');B(0,18,11,2,'bl');
+    B(12,8,5,7,'sk');B(0,10,4,8,'sk');
+    B(0,22,5,7,'gi');B(7,22,5,7,'gd');B(0,27,6,3,'sh');B(7,27,6,3,'sh');
+  } else { // lying down
+    B(0,22,3,4,'hr');B(0,20,11,8,'sk');
+    B(11,21,11,6,'gi');B(10,24,12,2,'bl');
+    B(6,19,6,4,'sk');B(18,20,5,5,'sk');
+    B(5,25,7,4,'gd');B(13,25,8,4,'gi');
+    B(3,27,7,3,'sh');B(18,26,7,3,'sh');
+  }
+}
+
+// Main draw dispatcher ─────────────────────────────────
+function drawChar(x,y,state,fr,pal,flash,flip){
+  cx.save();
+  if(flip){cx.translate(~~x+CW,~~y);cx.scale(-1,1);_X=0;_Y=0;}
+  else{_X=~~x;_Y=~~y;}
+  _P=pal; _F=flash||null;
+  switch(state){
+    case'walk':  poseWalk(fr);   break;
+    case'fight': poseStand();    break;
+    case'punch': posePunch(fr);  break;
+    case'kick':  poseKick(fr);   break;
+    case'block': poseBlock();    break;
+    case'hit':   poseHit();      break;
+    case'die':   poseDie(fr);    break;
+    default:     poseStand();
+  }
+  cx.restore();
+}
+
+// ── BACKGROUNDS ──────────────────────────────────────
+function bgTemple(sx){
+  R(0,0,NW,145,C.SKY);R(0,0,NW,45,'#0C1840');
+  // Stars
+  for(let i=0;i<22;i++)R((i*79+~~(sx*.05))%NW,(i*43)%75,1+(i%3<1?1:0),1,C.WHT);
+  // Mountains
+  for(let m=0;m<4;m++){
+    const mx=(((-sx*.22+m*90)+400)%(NW+100))-50;
+    for(let h=0;h<48;h++)R(mx+h*.5,110-h,Math.max(0,48-h*.85),1,h<24?C.MTN:C.MTN2);
+  }
+  // Temple walls
+  for(let w=0;w<4;w++){
+    const wx=(((-sx*.48+w*85)+400)%(NW+130))-65;
+    R(wx,122,62,62,C.WALL);R(wx+4,122,54,57,C.WALL2);
+    R(wx+19,130,24,52,C.BLK); // gate arch
+    R(wx-5,115,72,9,C.STONE);R(wx-7,111,76,6,C.STONE2);
+    R(wx+6,111,50,3,C.PATH2); // roof ridge
+  }
+  R(0,163,NW,NH-163,C.GND);R(0,163,NW,4,C.GND2);
+  R(0,167,NW,NH-167,C.PATH);R(0,188,NW,5,C.PATH2);
+  R(0,GL-1,NW,2,C.PATH2);
+}
+function bgGarden(sx){
+  R(0,0,NW,148,C.SKY2);
+  for(let i=0;i<4;i++){
+    const hx=(((-sx*.18+i*95)+400)%(NW+110))-55;
+    for(let h=0;h<30;h++)R(hx+h*.5,130-h,Math.max(0,62-h*1.2),1,C.GRASS);
+  }
+  for(let i=0;i<3;i++){
+    const tx=(((-sx*.42+i*100)+400)%(NW+130))-65;
+    R(tx+11,108,5,57,C.BEAM);
+    R(tx,96,30,20,C.LEAF);R(tx+6,86,22,16,C.LEAF);R(tx-3,103,20,14,C.LEAF);
+    R(tx+2,94,5,5,C.FLOWER);R(tx+14,88,5,5,C.FLOWER);R(tx+8,106,5,5,C.FLOWER);
+  }
+  for(let i=0;i<5;i++){
+    const px=(((-sx*.75+i*58)+400)%(NW+80))-40;
+    R(px,166,52,20,C.STONE);R(px+4,168,44,16,C.STONE2);R(px,166,1,20,C.BLK);
+  }
+  R(0,163,NW,4,C.GND);R(0,167,NW,NH-167,C.GND2);R(0,GL-1,NW,2,C.STONE2);
+}
+function bgDojo(sx){
+  R(0,0,NW,NH,C.DJWALL);R(0,0,NW,162,C.DJWALL);R(0,158,NW,4,'#2C1000');
+  for(let i=0;i<6;i++){
+    const bx=(((-sx*.12+i*70)+400)%(NW+110))-55;
+    R(bx,0,10,162,C.DJBM);R(bx+2,0,6,162,C.DJWALL);
+  }
+  for(let i=0;i<4;i++){
+    const lx=(((-sx*.12+i*82)+400)%(NW+110))-55;
+    R(lx+30,6,4,8,C.DJBM);
+    R(lx+26,14,22,24,C.LAN);R(lx+28,12,18,5,C.LANG);R(lx+28,37,18,5,C.LANG);
+    R(lx+32,41,10,8,C.LAN);
+    cx.globalAlpha=.12;R(lx+18,10,36,32,C.LAN);cx.globalAlpha=1;
+  }
+  R(0,158,NW,NH-158,C.DJFLR);
+  for(let i=0;i<6;i++){
+    const fx=(((-sx*.95+i*52)+400)%(NW+70))-35;
+    R(fx,158,50,NH-158,C.DJWALL);R(fx,158,2,NH-158,C.DJFLR);
+  }
+  R(0,GL-1,NW,2,'#180800');
+}
+function drawBG(type,sx){
+  if(type==='temple')bgTemple(sx);
+  else if(type==='garden')bgGarden(sx);
+  else bgDojo(sx);
+}
+
+// ── STAGES ───────────────────────────────────────────
+const STAGES=[
+  {name:'TEMPLE GATES',bg:'temple',mus:'s1',
+   foes:[{t:'guard'},{t:'guard'},{t:'warrior'}]},
+  {name:'THE GARDEN',  bg:'garden',mus:'s2',
+   foes:[{t:'warrior'},{t:'warrior'},{t:'master'}]},
+  {name:'SHADOW DOJO', bg:'dojo',  mus:'boss',
+   foes:[{t:'master'},{t:'boss'}]},
+];
+const ECFG={
+  guard:  {hp:80,  atk:12,spd:.40,atkInt:110,telFr:42},
+  warrior:{hp:110, atk:18,spd:.50,atkInt:80, telFr:32},
+  master: {hp:145, atk:22,spd:.55,atkInt:65, telFr:26},
+  boss:   {hp:265, atk:28,spd:.40,atkInt:54, telFr:36},
+};
+
+// ── GAME OBJECTS ─────────────────────────────────────
+let PL,FOES,G;
+function mkPL(){
+  return{x:25,y:GL-CH,hp:100,mhp:100,lives:3,score:0,
+    st:'walk',fr:0,ti:0,inCombat:false,hitCD:0,
+    diedDone:false,fTmr:0,atkHit:null,blocking:false,stepT:0};
+}
+function mkEnemy(type,x){
+  const cfg=ECFG[type];
+  return{type,x,y:GL-CH,hp:cfg.hp,mhp:cfg.hp,
+    st:'walk',fr:0,ti:0,
+    ai:{phase:'approach',atkT:cfg.atkInt+~~(Math.random()*30),
+        telT:0,nxtA:'punch',cfg},
+    hitCD:0,dead:false,fTmr:0,atkHit:null,blocking:false};
+}
+function mkG(){
+  return{st:'title',stI:0,fI:0,frame:0,bgX:0,
+    scrFlash:0,flCol:C.WHT,intrT:0,clrT:0,ovT:0,dthT:0,paused:false};
+}
+G=mkG(); PL=mkPL(); FOES=[];
+
+// ── INPUT ─────────────────────────────────────────────
+const KD={},KJ={},BH={},BJ={};
+document.addEventListener('keydown',e=>{
+  if(!KD[e.code])KJ[e.code]=true;
+  KD[e.code]=true; initAC(); e.preventDefault();
+});
+document.addEventListener('keyup',e=>{KD[e.code]=false;});
+// Touch buttons
+[['bl','left'],['br','right'],['bp','punch'],
+ ['bk','kick'],['bb','block'],['bs','start']].forEach(([id,nm])=>{
+  const el=document.getElementById(id);if(!el)return;
+  el.addEventListener('pointerdown',e=>{e.preventDefault();BH[nm]=true;BJ[nm]=true;initAC();});
+  el.addEventListener('pointerup',  e=>{e.preventDefault();BH[nm]=false;});
+  el.addEventListener('pointercancel',e=>{e.preventDefault();BH[nm]=false;});
+});
+function isL(){return KD.ArrowLeft||KD.KeyA||BH.left;}
+function isR(){return KD.ArrowRight||KD.KeyD||BH.right;}
+function isP(){const v=KJ.KeyZ||KJ.KeyJ||BJ.punch;KJ.KeyZ=KJ.KeyJ=BJ.punch=false;return v;}
+function isK(){const v=KJ.KeyX||KJ.KeyK||BJ.kick;KJ.KeyX=KJ.KeyK=BJ.kick=false;return v;}
+function isB(){return KD.KeyC||KD.KeyL||BH.block;}
+function isST(){const v=KJ.Enter||KJ.Space||BJ.start;KJ.Enter=KJ.Space=BJ.start=false;return v;}
+function clrJ(){['KeyZ','KeyJ','KeyX','KeyK','Enter','Space'].forEach(k=>KJ[k]=false);
+  ['punch','kick','start'].forEach(k=>BJ[k]=false);}
+
+// ── UPDATE ───────────────────────────────────────────
+function updPL(){
+  const p=PL;
+  if(p.fTmr>0)p.fTmr--;
+  if(p.hitCD>0)p.hitCD--;
+  p.blocking=false; p.atkHit=null;
+  if(p.st==='die'){p.ti++;if(p.ti===22)p.fr=1;if(p.ti>68)p.diedDone=true;return;}
+  if(p.st==='hit'){p.ti++;if(p.ti>24){p.st=p.hp>0?'fight':'die';p.ti=0;p.fr=0;}return;}
+  if(p.st==='punch'){
+    p.ti++;if(p.ti===5)p.fr=1;
+    if(p.ti>=5&&p.ti<=11)p.atkHit={x:p.x+18,y:p.y+5,w:9,h:8,dmg:15,tp:'high'};
+    if(p.ti>16){p.st='fight';p.ti=0;p.fr=0;}return;
+  }
+  if(p.st==='kick'){
+    p.ti++;if(p.ti===7)p.fr=1;
+    if(p.ti>=7&&p.ti<=13)p.atkHit={x:p.x+13,y:p.y+17,w:13,h:7,dmg:22,tp:'low'};
+    if(p.ti>19){p.st='fight';p.ti=0;p.fr=0;}return;
+  }
+  if(p.inCombat){
+    p.st='fight';
+    if(isB()){p.st='block';p.blocking=true;}
+    if(isP()&&!p.blocking){p.st='punch';p.fr=0;p.ti=0;SFX('punch');}
+    else if(isK()&&!p.blocking){p.st='kick';p.fr=0;p.ti=0;SFX('kick');}
+    if(isL())p.x=Math.max(5,p.x-1.0);
+    if(isR())p.x=Math.min(140,p.x+1.0);
+  } else {
+    p.st='walk';
+    p.stepT++;if(p.stepT%14===0)SFX('step');
+    p.ti++;if(p.ti>9){p.ti=0;p.fr^=1;}
+    if(isL())p.x=Math.max(5,p.x-.65);
+    else p.x=Math.min(NW-CW-5,p.x+.65);
+    G.bgX+=.65;
+  }
+}
+
+function updEnemy(e){
+  if(e.dead)return;
+  if(e.fTmr>0)e.fTmr--;
+  if(e.hitCD>0)e.hitCD--;
+  e.atkHit=null; e.blocking=false;
+  if(e.st==='die'){e.ti++;if(e.ti===22)e.fr=1;if(e.ti>62)e.dead=true;return;}
+  if(e.st==='hit'){
+    e.ti++;
+    if(e.ti>22){e.st=e.hp>0?'fight':'die';e.ti=0;e.fr=0;if(e.hp<=0)SFX('die');}
+    return;
+  }
+  if(e.st==='punch'){
+    e.ti++;if(e.ti===6)e.fr=1;
+    if(e.ti>=6&&e.ti<=12)e.atkHit={x:e.x-11,y:e.y+5,w:11,h:8,dmg:e.ai.cfg.atk,tp:'high'};
+    if(e.ti>17){e.st='fight';e.ti=0;e.fr=0;}return;
+  }
+  if(e.st==='kick'){
+    e.ti++;if(e.ti===8)e.fr=1;
+    if(e.ti>=8&&e.ti<=14)e.atkHit={x:e.x-14,y:e.y+17,w:14,h:7,dmg:e.ai.cfg.atk+6,tp:'low'};
+    if(e.ti>20){e.st='fight';e.ti=0;e.fr=0;}return;
+  }
+  // AI logic
+  const ai=e.ai,dist=e.x-PL.x;
+  if(ai.phase==='approach'){
+    e.st='walk';e.ti++;if(e.ti>9){e.ti=0;e.fr^=1;}
+    if(dist>44)e.x-=ai.cfg.spd;else{ai.phase='fight';SFX('alert');}
+  } else {
+    if(dist>54)e.x-=ai.cfg.spd*.55;
+    else if(dist<28&&dist>4)e.x+=ai.cfg.spd*.35;
+    e.st='fight';
+    // Boss occasionally blocks
+    if(e.type==='boss'&&e.st==='fight'&&Math.random()<.006){
+      e.blocking=true;e.st='block';
+    }
+    if(ai.telT>0){
+      ai.telT--;e.fTmr=3; // rapid flash = telegraph
+      if(ai.telT===0){
+        e.st=ai.nxtA; e.fr=0;e.ti=0;SFX(ai.nxtA);
+        ai.atkT=ai.cfg.atkInt+~~(Math.random()*28);
+      }
+    } else {
+      ai.atkT--;
+      if(ai.atkT<=0&&dist<58&&dist>2){
+        ai.nxtA=Math.random()<.5?'punch':'kick';
+        ai.telT=ai.cfg.telFr;SFX('tele');
+      }
+    }
+  }
+  e.x=Math.max(NW/2,Math.min(NW-CW-6,e.x));
+}
+
+function checkHits(){
+  // Player → enemies
+  if(PL.atkHit){
+    const h=PL.atkHit;
+    for(const e of FOES){
+      if(e.dead||e.st==='die'||e.hitCD>0)continue;
+      if(e.x<h.x+h.w&&e.x+CW>h.x&&e.y<h.y+h.h&&e.y+CH>h.y){
+        let dmg=h.dmg;
+        if(e.blocking){dmg=~~(dmg*.12);SFX('block');}else SFX('hit');
+        e.hp=Math.max(0,e.hp-dmg);e.hitCD=22;e.fTmr=9;
+        // Interrupt telegraph
+        if(e.ai.telT>0){e.ai.telT=0;e.ai.atkT=e.ai.cfg.atkInt;}
+        if(!e.blocking){e.st='hit';e.ti=0;e.fr=0;}
+        if(e.hp<=0&&!e.blocking){e.st='die';e.ti=0;e.fr=0;}
+        PL.score+=dmg;
+      }
+    }
+  }
+  // Enemies → player
+  for(const e of FOES){
+    if(e.dead||!e.atkHit||PL.hitCD>0)continue;
+    const h=e.atkHit;
+    if(PL.x<h.x+h.w&&PL.x+CW>h.x&&PL.y<h.y+h.h&&PL.y+CH>h.y){
+      let dmg=h.dmg;
+      if(PL.blocking){dmg=~~(dmg*.12);SFX('block');}else SFX('hit');
+      PL.hp=Math.max(0,PL.hp-dmg);PL.hitCD=30;PL.fTmr=14;
+      if(!PL.blocking){PL.st='hit';PL.ti=0;PL.fr=0;}
+      if(PL.hp<=0&&!PL.blocking){PL.st='die';PL.ti=0;PL.fr=0;SFX('die');}
+    }
+  }
+}
+function curFoe(){return FOES.find(e=>!e.dead);}
+
+function spawnFoe(){
+  const st=STAGES[G.stI];
+  if(G.fI<st.foes.length){
+    FOES=[mkEnemy(st.foes[G.fI++].t,NW-CW-8)];
+    PL.inCombat=false;PL.st='walk';PL.x=Math.min(PL.x,55);
+  }
+}
+function startStage(i){
+  G.stI=i;G.fI=0;G.bgX=0;FOES=[];
+  G.st='intro';G.intrT=0;G.dthT=0;G.clrT=0;
+  PL.x=25;PL.y=GL-CH;PL.hp=PL.mhp;
+  PL.st='walk';PL.fr=0;PL.ti=0;PL.inCombat=false;PL.diedDone=false;
+  MUSIC(STAGES[i].mus);
+  spawnFoe();
+}
+
+// ── DRAW SCREENS ─────────────────────────────────────
+function drawHUD(){
+  R(0,0,NW,15,C.BLK);R(0,15,NW,1,'#3a3a22');
+  T('HP',2,3,C.CYN);R(14,4,60,7,C.HPBG);
+  const hf=~~((PL.hp/PL.mhp)*58);
+  R(14,4,hf,7,PL.hp<25?C.HPLO:C.HPFG);
+  R(74,3,7,7,'#FF4444');T('x'+PL.lives,82,3,C.WHT);
+  T(String(PL.score).padStart(6,'0'),104,3,C.YEL);
+  const f=curFoe();
+  if(f&&!f.dead){
+    const nm=f.type.toUpperCase();
+    T(nm,NW-60,3,C.RED);
+    R(NW-64,4,60,7,C.EBG);
+    R(NW-64,4,~~((f.hp/f.mhp)*58),7,f.hp/f.mhp<.3?C.HPLO:C.EFG);
+  }
+}
+
+function drawTitle(){
+  R(0,0,NW,NH,'#06091C');
+  for(let i=0;i<44;i++){R((i*73+~~(G.frame*.15))%NW,(i*41)%165,1+(i%4<1?1:0),1,
+    `rgba(255,255,255,${.25+.75*(i%3)/3})`);}
+  for(let m=0;m<5;m++)for(let h=0;h<38;h++)
+    R(m*60+h*.5,150-h,Math.max(0,36-h*.85),1,h<19?C.MTN:C.MTN2);
+  R(0,148,NW,NH-148,C.GND);R(0,150,NW,NH-150,C.PATH);
+  // Title box
+  R(6,18,NW-12,62,C.BLK);R(8,20,NW-16,58,'#08051A');
+  R(8,20,NW-16,2,C.PRP);R(8,76,NW-16,2,C.PRP);
+  Tc('IRON PATH',28,C.YEL,20);
+  Tc('━━━━━━━━━━━━━━━━━',50,C.PRP,7);
+  Tc('A  M A R T I A L  A R T S  L E G E N D',60,C.WHT,6);
+  drawChar(22,GL-CH,'fight',0,PAL.player,null,false);
+  drawChar(NW-46,GL-CH,'fight',0,PAL.warrior,null,true);
+  if(G.frame%60<38)Tc('▶  PRESS ENTER / START',135,C.CYN,8);
+  T('Z:PUNCH  X:KICK  C:BLOCK  ◀▶:MOVE',12,158,C.DGY||'#777',6);
+  Tc('Original work by Catalin Prodan',NH-14,'#444',6);
+  T('[H] HOW TO PLAY',78,NH-8,C.YEL,6);
+}
+
+function drawHowTo(){
+  R(0,0,NW,NH,'#08051A');
+  Tc('HOW  TO  PLAY',10,C.YEL,12);R(4,26,NW-8,1,C.PRP);
+  const L=[
+    [C.CYN,7,34,'MOVEMENT'],
+    [C.WHT,6,44,'◀ ▶  Arrow Keys  /  Walk Buttons'],
+    ['#888',6,52,'Move left or right during combat.'],
+    [C.CYN,7,64,'ATTACKS'],
+    [C.WHT,6,74,'Z / PUNCH — High Strike (fast, 15 dmg)'],
+    [C.WHT,6,83,'X / KICK  — Low Sweep  (slow, 22 dmg)'],
+    [C.CYN,7,95,'DEFENSE'],
+    [C.WHT,6,105,'Hold C / BLOCK to guard yourself.'],
+    ['#888',6,113,'Reduces all incoming damage by 88%.'],
+    [C.CYN,7,125,'TACTICS'],
+    [C.WHT,6,135,'Watch for orange flashing — enemy is'],
+    [C.WHT,6,143,'about to attack! Block or strike first.'],
+    [C.YEL,6,151,'Hitting a telegraphing enemy cancels'],
+    [C.YEL,6,159,'their attack — aggression is rewarded!'],
+    [C.CYN,7,171,'OBJECTIVE'],
+    [C.WHT,6,181,'Clear 3 stages. Defeat the Final Boss.'],
+    ['#888',6,189,'You have 3 lives. Reach the end alive.'],
+  ];
+  L.forEach(([c,sz,y,s])=>T(s,8,y,c,sz));
+  R(4,NH-22,NW-8,1,C.PRP);
+  if(G.frame%60<40)Tc('▶  PRESS ENTER TO BEGIN',NH-18,C.CYN,8);
+}
+
+function drawIntro(){
+  const st=STAGES[G.stI];
+  drawBG(st.bg,G.bgX);drawHUD();
+  const a=G.intrT<30?G.intrT/30:G.intrT>90?1-(G.intrT-90)/30:1;
+  cx.globalAlpha=Math.max(0,a);
+  R(0,82,NW,44,C.BLK);R(1,84,NW-2,40,'#080420');
+  Tc('STAGE '+(G.stI+1),88,C.YEL,14);Tc(st.name,105,C.WHT,8);
+  cx.globalAlpha=1;
+}
+
+function drawPlay(){
+  const st=STAGES[G.stI];
+  drawBG(st.bg,G.bgX);drawHUD();
+  // Player
+  const pf=PL.fTmr>0?(G.frame%4<2?C.WHT:null):null;
+  drawChar(PL.x,PL.y,PL.st,PL.fr,PAL.player,pf,false);
+  // Enemies
+  for(const e of FOES){
+    if(e.st!=='die'&&e.dead)continue;
+    const ef=e.fTmr>0?(e.ai.telT>0?'#FF8800':(G.frame%4<2?C.WHT:null)):null;
+    drawChar(e.x,e.y,e.st,e.fr,PAL[e.type]||PAL.guard,ef,true);
+  }
+  if(G.scrFlash>0){
+    cx.globalAlpha=G.scrFlash/18;R(0,0,NW,NH,G.flCol);cx.globalAlpha=1;G.scrFlash--;
+  }
+  if(G.paused){
+    cx.globalAlpha=.55;R(0,0,NW,NH,C.BLK);cx.globalAlpha=1;
+    Tc('PAUSED',95,C.YEL,18);Tc('ENTER to resume',118,C.WHT,8);
+  }
+}
+
+function drawClear(){
+  const st=STAGES[G.stI];drawBG(st.bg,G.bgX);drawHUD();
+  R(22,82,NW-44,52,C.BLK);R(24,84,NW-48,48,'#080420');
+  Tc('STAGE  CLEAR!',90,C.YEL,13);
+  Tc('SCORE: '+PL.score,110,C.WHT,9);
+  if(G.clrT>55&&G.frame%60<40)Tc('PRESS ENTER',128,C.CYN,8);
+}
+
+function drawGameOver(){
+  R(0,0,NW,NH,C.BLK);
+  if(G.ovT<30)R(0,0,NW,NH,'#380000');
+  Tc('GAME  OVER',82,C.RED,22);
+  Tc('FINAL SCORE: '+PL.score,120,C.WHT,10);
+  if(G.ovT>90&&G.frame%60<40)Tc('PRESS ENTER TO RETRY',148,C.CYN,8);
+}
+
+function drawWin(){
+  R(0,0,NW,NH,'#07041A');
+  for(let i=0;i<55;i++)R((i*73+G.frame*.3)%NW,(i*37)%(NH-50),1,1,C.WHT);
+  Tc('V I C T O R Y !',55,C.YEL,22);
+  Tc('The Iron Path is mastered.',88,C.WHT,8);
+  Tc('FINAL SCORE: '+PL.score,110,C.CYN,10);
+  Tc('LIVES LEFT: '+PL.lives,132,C.GRN,8);
+  if(G.frame%60<40)Tc('PRESS ENTER TO PLAY AGAIN',164,C.ORG,8);
+  Tc('IRON PATH  ·  ORIGINAL WORK BY CATALIN PRODAN',NH-12,'#333',5);
+}
+
+// ── MAIN LOOP ─────────────────────────────────────────
+let lastT=0;
+function loop(t){
+  requestAnimationFrame(loop);
+  if(t-lastT<14)return; lastT=t;
+  G.frame++;
+
+  // Background clear
+  R(0,0,NW,NH,C.BLK);
+
+  switch(G.st){
+    case'title':
+      drawTitle();
+      if(isST()){G.st='howto';SFX('beep');MUSIC('title');}
+      if(KJ.KeyH||BJ.start&&false){G.st='howto';SFX('beep');}
+      if(KJ.KeyH){G.st='howto';SFX('beep');KJ.KeyH=false;}
+      break;
+
+    case'howto':
+      drawHowTo();
+      if(isST()){PL=mkPL();startStage(0);SFX('beep');}
+      break;
+
+    case'intro':
+      G.intrT++;drawIntro();
+      if(G.intrT>125)G.st='play';
+      break;
+
+    case'play':
+      if(KJ.Escape||KJ.KeyP){G.paused=!G.paused;KJ.Escape=KJ.KeyP=false;}
+      if(!G.paused){
+        updPL();
+        const cur=curFoe();
+        if(cur){
+          if(!PL.inCombat&&cur.x-PL.x<85)PL.inCombat=true;
+          if(PL.inCombat){updEnemy(cur);checkHits();}
+          if(cur.dead){
+            G.scrFlash=12;G.flCol=C.WHT;PL.score+=100;
+            SFX('clear');G.st='spawn';G.dthT=0;
+          }
+        } else if(G.fI>=STAGES[G.stI].foes.length){
+          // All enemies spawned and dead → stage clear
+          G.st='clear';G.clrT=0;MUSIC(null);SFX('clear');
+        }
+        // Player death
+        if(PL.st==='die'&&PL.diedDone){
+          PL.lives--;
+          if(PL.lives<=0){G.st='over';G.ovT=0;SFX('go');MUSIC(null);}
+          else{G.st='respawn';G.dthT=0;}
+        }
+      }
+      drawPlay();
+      break;
+
+    case'spawn':
+      G.dthT++;drawPlay();
+      if(G.dthT>80){spawnFoe();G.st='play';}
+      break;
+
+    case'respawn':
+      G.dthT++;drawPlay();
+      if(G.dthT>90){startStage(G.stI);}
+      break;
+
+    case'clear':
+      G.clrT++;drawClear();
+      if(G.clrT>30&&isST()){
+        if(G.stI<STAGES.length-1){PL.hp=PL.mhp;startStage(G.stI+1);}
+        else{G.st='win';SFX('win');MUSIC(null);}
+      }
+      break;
+
+    case'over':
+      G.ovT++;drawGameOver();
+      if(G.ovT>90&&isST()){PL=mkPL();startStage(0);}
+      break;
+
+    case'win':
+      drawWin();
+      if(isST()){PL=mkPL();G.st='title';MUSIC('title');}
+      break;
+  }
+  clrJ();
+}
+MUSIC('title');
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>
